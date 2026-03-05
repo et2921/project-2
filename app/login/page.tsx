@@ -10,12 +10,13 @@ export default function LoginPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
   const router = useRouter()
-  const supabase = createClient()
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
     setError('')
+
+    const supabase = createClient()
 
     const { error: authError } = await supabase.auth.signInWithPassword({ email, password })
 
@@ -25,7 +26,6 @@ export default function LoginPage() {
       return
     }
 
-    // Check superadmin status
     const { data: { user } } = await supabase.auth.getUser()
     if (!user) {
       setError('Authentication failed.')
