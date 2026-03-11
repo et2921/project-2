@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 type Image = {
@@ -34,8 +34,10 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
   const [editingId, setEditingId] = useState<string | null>(null)
   const [form, setForm] = useState<ImageFormData>(emptyForm)
   const [loading, setLoading] = useState(false)
+  const [uploading, setUploading] = useState(false)
   const [error, setError] = useState('')
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
   const supabase = createClient()
 
   function openCreate() {
@@ -61,6 +63,29 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
     setShowCreate(false)
     setEditingId(null)
     setError('')
+  }
+
+  async function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setUploading(true)
+    setError('')
+
+    const ext = file.name.split('.').pop()
+    const path = `uploads/${Date.now()}.${ext}`
+
+    const { data, error: upErr } = await supabase.storage
+      .from('images')
+      .upload(path, file, { upsert: false })
+
+    if (upErr) {
+      // Storage bucket may not exist — fall back to pasting URL
+      setError(`Upload failed: ${upErr.message}. Please paste a URL instead.`)
+    } else {
+      const { data: urlData } = supabase.storage.from('images').getPublicUrl(data.path)
+      setForm(f => ({ ...f, url: urlData.publicUrl }))
+    }
+    setUploading(false)
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -146,11 +171,36 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
         </div>
       )}
 
-      {/* Create/Edit form */}
       {showCreate && (
         <div className="bg-gray-900 border border-gray-700 rounded-xl p-5 mb-6">
           <h2 className="text-white font-semibold mb-4">{editingId ? 'Edit Image' : 'New Image'}</h2>
           <form onSubmit={handleSubmit} className="space-y-4">
+
+            {/* File upload */}
+            {!editingId && (
+              <div>
+                <label className="block text-sm text-gray-300 mb-1">Upload File</label>
+                <div className="flex items-center gap-3">
+                  <input
+                    ref={fileRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={handleFileUpload}
+                    className="hidden"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => fileRef.current?.click()}
+                    disabled={uploading}
+                    className="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-300 text-sm px-4 py-2 rounded-lg transition-colors"
+                  >
+                    {uploading ? 'Uploading…' : 'Choose File'}
+                  </button>
+                  <span className="text-gray-500 text-xs">or paste a URL below</span>
+                </div>
+              </div>
+            )}
+
             <div>
               <label className="block text-sm text-gray-300 mb-1">Image URL</label>
               <input
@@ -162,6 +212,7 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
                 placeholder="https://..."
               />
             </div>
+
             <div>
               <label className="block text-sm text-gray-300 mb-1">Additional Context</label>
               <textarea
@@ -172,13 +223,14 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
                 placeholder="Optional context..."
               />
             </div>
+
             <div className="flex gap-6">
               <label className="flex items-center gap-2 text-sm text-gray-300 cursor-pointer">
                 <input
                   type="checkbox"
                   checked={form.is_public}
                   onChange={e => setForm(f => ({ ...f, is_public: e.target.checked }))}
-                  className="rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+                  className="rounded border-gray-600 bg-gray-800 text-indigo-600"
                 />
                 Public
               </label>
@@ -187,11 +239,12 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
                   type="checkbox"
                   checked={form.is_common_use}
                   onChange={e => setForm(f => ({ ...f, is_common_use: e.target.checked }))}
-                  className="rounded border-gray-600 bg-gray-800 text-indigo-600 focus:ring-indigo-500"
+                  className="rounded border-gray-600 bg-gray-800 text-indigo-600"
                 />
                 Common Use
               </label>
             </div>
+
             <div className="flex gap-3 pt-1">
               <button
                 type="submit"
@@ -212,7 +265,6 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
         </div>
       )}
 
-      {/* Images grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
         {images.map(img => (
           <div key={img.id} className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
@@ -227,39 +279,19 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
             )}
             <div className="p-3">
               <div className="flex gap-1 mb-2">
-                {img.is_public && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">public</span>
-                )}
-                {img.is_common_use && (
-                  <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">common use</span>
-                )}
+                {img.is_public && <span className="text-xs px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">public</span>}
+                {img.is_common_use && <span className="text-xs px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-400">common use</span>}
               </div>
               <p className="text-gray-400 text-xs line-clamp-2 mb-3">
                 {img.image_description?.slice(0, 100) || img.additional_context?.slice(0, 100) || 'No description'}
               </p>
               <p className="text-gray-600 text-xs font-mono mb-3">{img.id.slice(0, 8)}…</p>
               <div className="flex gap-2">
-                <button
-                  onClick={() => openEdit(img)}
-                  className="flex-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 rounded-lg transition-colors"
-                >
-                  Edit
-                </button>
+                <button onClick={() => openEdit(img)} className="flex-1 text-xs bg-gray-800 hover:bg-gray-700 text-gray-300 py-1.5 rounded-lg transition-colors">Edit</button>
                 {deleteConfirm === img.id ? (
-                  <button
-                    onClick={() => handleDelete(img.id)}
-                    disabled={loading}
-                    className="flex-1 text-xs bg-red-600 hover:bg-red-500 text-white py-1.5 rounded-lg transition-colors"
-                  >
-                    Confirm
-                  </button>
+                  <button onClick={() => handleDelete(img.id)} disabled={loading} className="flex-1 text-xs bg-red-600 hover:bg-red-500 text-white py-1.5 rounded-lg transition-colors">Confirm</button>
                 ) : (
-                  <button
-                    onClick={() => setDeleteConfirm(img.id)}
-                    className="flex-1 text-xs bg-gray-800 hover:bg-red-900/50 text-red-400 py-1.5 rounded-lg transition-colors"
-                  >
-                    Delete
-                  </button>
+                  <button onClick={() => setDeleteConfirm(img.id)} className="flex-1 text-xs bg-gray-800 hover:bg-red-900/50 text-red-400 py-1.5 rounded-lg transition-colors">Delete</button>
                 )}
               </div>
             </div>
@@ -267,9 +299,7 @@ export default function ImagesClient({ initialImages }: { initialImages: Image[]
         ))}
       </div>
 
-      {images.length === 0 && (
-        <div className="text-center py-16 text-gray-500">No images found</div>
-      )}
+      {images.length === 0 && <div className="text-center py-16 text-gray-500">No images found</div>}
     </div>
   )
 }
